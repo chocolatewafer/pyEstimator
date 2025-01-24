@@ -1,6 +1,6 @@
 import sys
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QVBoxLayout, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QWidget, QMessageBox, QFileDialog
+    QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QWidget, QMessageBox, QFileDialog
 )
 from PySide6.QtCore import Qt, QThread, Signal, QObject, QMutex, QWaitCondition
 from PySide6.QtGui import QColor
@@ -81,20 +81,31 @@ class ProductScraperApp(QMainWindow):
         self.worker.finished.connect(self.update_item)
         self.worker.start()
 
-        # Layout
+        # Setup UI
+        self.setup_ui()
+
+    def setup_ui(self):
+        """
+        Sets up the UI elements.
+        """
+        # Main layout
         self.layout = QVBoxLayout()
 
-        # Project Name Input
+        # Project Name Input and Create Project Button
+        project_name_layout = QHBoxLayout()
+
         self.project_name_label = QLabel("Enter Project Name:")
-        self.layout.addWidget(self.project_name_label)
+        project_name_layout.addWidget(self.project_name_label)
+
         self.project_name_input = QLineEdit()
         self.project_name_input.setPlaceholderText("Enter project name (write once)")
-        self.layout.addWidget(self.project_name_input)
+        project_name_layout.addWidget(self.project_name_input)
 
-        # New Project Button
-        self.new_project_button = QPushButton("New Project")
-        self.new_project_button.clicked.connect(self.new_project)
-        self.layout.addWidget(self.new_project_button)
+        self.create_project_button = QPushButton("Create Project")
+        self.create_project_button.clicked.connect(self.create_project)
+        project_name_layout.addWidget(self.create_project_button)
+
+        self.layout.addLayout(project_name_layout)
 
         # Product Link Input
         self.link_label = QLabel("Enter Product Link:")
@@ -157,35 +168,27 @@ class ProductScraperApp(QMainWindow):
         self.central_widget.setLayout(self.layout)
         self.setCentralWidget(self.central_widget)
 
-    def closeEvent(self, event):
+    def create_project(self):
         """
-        Handles the window close event to stop the worker thread gracefully.
+        Creates a new project with the entered project name.
         """
-        self.worker.stop()
-        event.accept()
+        project_name = self.project_name_input.text().strip()
+        if not project_name:
+            QMessageBox.warning(self, "Error", "Please enter a project name.")
+            return
 
-    def new_project(self):
-        """
-        Resets the project and enables editing the project name.
-        """
-        self.project = None
-        self.project_name_input.setDisabled(False)  # Enable project name input
-        self.project_name_input.clear()  # Clear the project name field
-        self.table.setRowCount(0)  # Clear the table
-        QMessageBox.information(self, "New Project", "A new project has been created. You can now enter a new project name.")
+        # Create a new project
+        self.project = Project(project_name)
+        self.project_name_input.setDisabled(True)  # Disable project name input after creating the project
+        QMessageBox.information(self, "Project Created", f"Project '{project_name}' has been created.")
 
     def search_product_via_link(self):
         """
         Searches for the product using the provided link and adds it to the table.
         """
-        # Get project name if not already set
         if not self.project:
-            project_name = self.project_name_input.text().strip()
-            if not project_name:
-                QMessageBox.warning(self, "Error", "Please enter a project name.")
-                return
-            self.project = Project(project_name)
-            self.project_name_input.setDisabled(True)  # Disable project name input after setting
+            QMessageBox.warning(self, "Error", "Please create a project first.")
+            return
 
         link = self.link_input.text().strip()
         quantity = self.quantity_input.text().strip()
@@ -224,14 +227,9 @@ class ProductScraperApp(QMainWindow):
         """
         Searches for the product using the provided name and adds it to the table.
         """
-        # Get project name if not already set
         if not self.project:
-            project_name = self.project_name_input.text().strip()
-            if not project_name:
-                QMessageBox.warning(self, "Error", "Please enter a project name.")
-                return
-            self.project = Project(project_name)
-            self.project_name_input.setDisabled(True)  # Disable project name input after setting
+            QMessageBox.warning(self, "Error", "Please create a project first.")
+            return
 
         product_name = self.product_name_input.text().strip()
         quantity = self.quantity_input.text().strip()
@@ -389,6 +387,9 @@ class ProductScraperApp(QMainWindow):
             self.project.items.pop(row)
 
     def calculate_total(self):
+        """
+        Calculates the total cost of all items in the project.
+        """
         if not self.project or not self.project.items:
             QMessageBox.warning(self, "Error", "No items added.")
             return
@@ -405,3 +406,10 @@ class ProductScraperApp(QMainWindow):
             return
 
         export_to_excel(self.table, self.project.name)
+
+    def closeEvent(self, event):
+        """
+        Handles the window close event to stop the worker thread gracefully.
+        """
+        self.worker.stop()
+        event.accept()

@@ -1,4 +1,6 @@
 from selenium import webdriver
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
@@ -7,10 +9,9 @@ from webdriver_manager.chrome import ChromeDriverManager
 import re
 import time
 
-
 def search_product(product_name):
     """
-    Searches for a product on Google, Bing, and DuckDuckGo and returns the price and URL from the first result where the price is found.
+    Searches for a product on Google, Bing, and DuckDuckGo and returns the price and URL from the top result.
     """
     # Set up Selenium options
     chrome_options = Options()
@@ -29,49 +30,43 @@ def search_product(product_name):
     try:
         # List of search engines to try
         search_engines = [
-            ("Google", "https://www.google.com", "q"),
-            ("Bing", "https://www.bing.com", "q"),
-            ("DuckDuckGo", "https://duckduckgo.com", "q")
+            ("Google", "https://www.google.com", "q", ".tF2Cxc"),  # Google result container
+            ("Bing", "https://www.bing.com", "q", ".b_algo"),  # Bing result container
+            ("DuckDuckGo", "https://duckduckgo.com", "q", ".result")  # DuckDuckGo result container
         ]
 
-        for engine_name, url, search_box_name in search_engines:
+        for engine_name, url, search_box_name, result_selector in search_engines:
             try:
                 # Open the search engine
                 driver.get(url)
 
-                # Search for the product
+                # Search for the product with "price in Nepal Daraz"
                 search_box = driver.find_element(By.NAME, search_box_name)
-                search_box.send_keys(f"{product_name} price in Nepal")
+                search_box.send_keys(f"{product_name} price in Nepal Daraz")
                 search_box.send_keys(Keys.RETURN)
 
                 # Wait for the search results to load
-                time.sleep(5)
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, result_selector))
+                )
 
-                # Get the top 5 results
-                if engine_name == "Google":
-                    results = driver.find_elements(By.CSS_SELECTOR, ".tF2Cxc")[:5]
-                elif engine_name == "Bing":
-                    results = driver.find_elements(By.CSS_SELECTOR, ".b_algo")[:5]
-                elif engine_name == "DuckDuckGo":
-                    results = driver.find_elements(By.CSS_SELECTOR, ".result")[:5]
+                # Get the top result link
+                top_result = driver.find_element(By.CSS_SELECTOR, result_selector)
+                link = top_result.find_element(By.CSS_SELECTOR, "a").get_attribute("href")
 
-                # Parse the price from the results
-                for result in results:
-                    if engine_name == "Google":
-                        description = result.find_element(By.CSS_SELECTOR, ".IsZvec").text
-                        link = result.find_element(By.CSS_SELECTOR, "a").get_attribute("href")
-                    elif engine_name == "Bing":
-                        description = result.find_element(By.CSS_SELECTOR, ".b_caption p").text
-                        link = result.find_element(By.CSS_SELECTOR, "a").get_attribute("href")
-                    elif engine_name == "DuckDuckGo":
-                        description = result.find_element(By.CSS_SELECTOR, ".result__snippet").text
-                        link = result.find_element(By.CSS_SELECTOR, "a").get_attribute("href")
+                # Print the top result link
+                print(f"Search Engine: {engine_name}")
+                print(f"Top Result Link: {link}")
 
-                    # Search for the price in the description
-                    price_match = re.search(r"NRs\.?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)", description)
-                    if price_match:
-                        price = float(price_match.group(1).replace(",", ""))
+                # Send the link to selenium_scraper.py to extract the price
+                from selenium_scraper import get_product_details
+                try:
+                    product_name, price = get_product_details(link)
+                    if price:
                         return price, link
+                except Exception as e:
+                    print(f"Error extracting price from {link}: {e}")
+                    continue
 
             except Exception as e:
                 print(f"Error searching on {engine_name}: {e}")
