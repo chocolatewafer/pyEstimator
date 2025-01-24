@@ -10,7 +10,7 @@ import time
 
 def search_product(product_name):
     """
-    Searches for a product on Google and returns the price and URL from the first result where the price is found.
+    Searches for a product on Google, Bing, and DuckDuckGo and returns the price and URL from the first result where the price is found.
     """
     # Set up Selenium options
     chrome_options = Options()
@@ -27,33 +27,58 @@ def search_product(product_name):
     driver = webdriver.Chrome(service=service, options=chrome_options)
 
     try:
-        # Open Google
-        driver.get("https://www.google.com")
+        # List of search engines to try
+        search_engines = [
+            ("Google", "https://www.google.com", "q"),
+            ("Bing", "https://www.bing.com", "q"),
+            ("DuckDuckGo", "https://duckduckgo.com", "q")
+        ]
 
-        # Search for the product
-        search_box = driver.find_element(By.NAME, "q")
-        search_box.send_keys(f"{product_name} price in Nepal")
-        search_box.send_keys(Keys.RETURN)
+        for engine_name, url, search_box_name in search_engines:
+            try:
+                # Open the search engine
+                driver.get(url)
 
-        # Wait for the search results to load
-        time.sleep(5)
+                # Search for the product
+                search_box = driver.find_element(By.NAME, search_box_name)
+                search_box.send_keys(f"{product_name} price in Nepal")
+                search_box.send_keys(Keys.RETURN)
 
-        # Get the top 3 results
-        results = driver.find_elements(By.CSS_SELECTOR, ".tF2Cxc")[:3]
+                # Wait for the search results to load
+                time.sleep(5)
 
-        # Parse the price from the results
-        for result in results:
-            description = result.find_element(By.CSS_SELECTOR, ".IsZvec").text
-            price_match = re.search(r"NRs\.?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)", description)
-            if price_match:
-                price = float(price_match.group(1).replace(",", ""))
-                link = result.find_element(By.CSS_SELECTOR, "a").get_attribute("href")
-                return price, link
+                # Get the top 5 results
+                if engine_name == "Google":
+                    results = driver.find_elements(By.CSS_SELECTOR, ".tF2Cxc")[:5]
+                elif engine_name == "Bing":
+                    results = driver.find_elements(By.CSS_SELECTOR, ".b_algo")[:5]
+                elif engine_name == "DuckDuckGo":
+                    results = driver.find_elements(By.CSS_SELECTOR, ".result")[:5]
+
+                # Parse the price from the results
+                for result in results:
+                    if engine_name == "Google":
+                        description = result.find_element(By.CSS_SELECTOR, ".IsZvec").text
+                        link = result.find_element(By.CSS_SELECTOR, "a").get_attribute("href")
+                    elif engine_name == "Bing":
+                        description = result.find_element(By.CSS_SELECTOR, ".b_caption p").text
+                        link = result.find_element(By.CSS_SELECTOR, "a").get_attribute("href")
+                    elif engine_name == "DuckDuckGo":
+                        description = result.find_element(By.CSS_SELECTOR, ".result__snippet").text
+                        link = result.find_element(By.CSS_SELECTOR, "a").get_attribute("href")
+
+                    # Search for the price in the description
+                    price_match = re.search(r"NRs\.?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)", description)
+                    if price_match:
+                        price = float(price_match.group(1).replace(",", ""))
+                        return price, link
+
+            except Exception as e:
+                print(f"Error searching on {engine_name}: {e}")
+                continue
 
         # If no price is found
         return None, None
-    except Exception as e:
-        print(f"Error searching for product: {e}")
-        return None, None
+
     finally:
         driver.quit()
