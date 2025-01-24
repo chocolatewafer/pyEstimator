@@ -23,7 +23,7 @@ def export_to_excel(table, project_name):
         data.append(row_data)
 
     # Create a DataFrame
-    df = pd.DataFrame(data, columns=["Product Name", "Quantity", "Price", "Cost"])
+    df = pd.DataFrame(data, columns=["Product Name", "Quantity", "Price", "Cost", "Link"])
 
     # Save the DataFrame to an Excel file
     file_name, _ = QFileDialog.getSaveFileName(
