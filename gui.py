@@ -1,27 +1,40 @@
+import sys
 from PySide6.QtWidgets import (
-    QMainWindow, QVBoxLayout, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QWidget, QMessageBox
+    QApplication, QMainWindow, QVBoxLayout, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QWidget, QMessageBox
 )
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal, QObject, QMutex, QWaitCondition
 from logic import Project
 from selenium_scraper import get_product_details
+from queue import Queue
 
 
 class ParseWorker(QThread):
     """
     Worker thread for parsing product details.
     """
-    finished = Signal(str, float, str)  # Emits product_name, price, error_message
+    finished = Signal(str, float, str, int)  # Emits product_name, price, error_message, row_position
 
-    def __init__(self, link):
+    def __init__(self, queue, mutex, condition):
         super().__init__()
-        self.link = link
+        self.queue = queue
+        self.mutex = mutex
+        self.condition = condition
 
     def run(self):
-        try:
-            product_name, price = get_product_details(self.link)
-            self.finished.emit(product_name, price, "")
-        except Exception as e:
-            self.finished.emit("", 0, str(e))
+        while True:
+            self.mutex.lock()
+            while self.queue.empty():
+                self.condition.wait(self.mutex)
+            link, quantity, row_position = self.queue.get()
+            self.mutex.unlock()
+
+            try:
+                product_name, price = get_product_details(link)
+                self.finished.emit(product_name, price, "", row_position)
+            except Exception as e:
+                self.finished.emit("", 0, str(e), row_position)
+
+            self.queue.task_done()
 
 
 class ProductScraperApp(QMainWindow):
@@ -33,6 +46,16 @@ class ProductScraperApp(QMainWindow):
         # Initialize project
         self.project = None
 
+        # Queue for parsing tasks
+        self.queue = Queue()
+        self.mutex = QMutex()
+        self.condition = QWaitCondition()
+
+        # Worker thread
+        self.worker = ParseWorker(self.queue, self.mutex, self.condition)
+        self.worker.finished.connect(self.update_item)
+        self.worker.start()
+
         # Layout
         self.layout = QVBoxLayout()
 
@@ -41,6 +64,11 @@ class ProductScraperApp(QMainWindow):
         self.layout.addWidget(self.project_name_label)
         self.project_name_input = QLineEdit()
         self.layout.addWidget(self.project_name_input)
+
+        # New Project Button
+        self.new_project_button = QPushButton("New Project")
+        self.new_project_button.clicked.connect(self.new_project)
+        self.layout.addWidget(self.new_project_button)
 
         # Link Input
         self.link_label = QLabel("Enter Product Link:")
@@ -76,6 +104,15 @@ class ProductScraperApp(QMainWindow):
         self.central_widget.setLayout(self.layout)
         self.setCentralWidget(self.central_widget)
 
+    def new_project(self):
+        """
+        Resets the project and enables editing the project name.
+        """
+        self.project = None
+        self.project_name_input.setDisabled(False)
+        self.project_name_input.clear()
+        self.table.setRowCount(0)
+
     def add_item(self):
         # Get project name if not already set
         if not self.project:
@@ -84,6 +121,7 @@ class ProductScraperApp(QMainWindow):
                 QMessageBox.warning(self, "Error", "Please enter a project name.")
                 return
             self.project = Project(project_name)
+            self.project_name_input.setDisabled(True)  # Disable project name input
 
         # Get link and quantity
         link = self.link_input.text().strip()
@@ -112,22 +150,24 @@ class ProductScraperApp(QMainWindow):
         clear_button.clicked.connect(lambda: self.clear_item(row_position))
         self.table.setCellWidget(row_position, 4, clear_button)
 
-        # Start the parsing thread
-        self.worker = ParseWorker(link)
-        self.worker.finished.connect(lambda name, price, error: self.update_item(row_position, name, price, error, quantity))
-        self.worker.start()
+        # Add the task to the queue
+        self.mutex.lock()
+        self.queue.put((link, quantity, row_position))
+        self.condition.wakeAll()
+        self.mutex.unlock()
 
-    def update_item(self, row, product_name, price, error, quantity):
+    def update_item(self, product_name, price, error, row_position):
         """
         Updates the table row with parsed data or an error message.
         """
         if error:
-            self.table.setItem(row, 0, QTableWidgetItem(f"Error: {error}"))
+            self.table.setItem(row_position, 0, QTableWidgetItem(f"Error: {error}"))
         else:
-            self.table.setItem(row, 0, QTableWidgetItem(product_name))
-            self.table.setItem(row, 2, QTableWidgetItem(f"NPR {price:.2f}"))
+            self.table.setItem(row_position, 0, QTableWidgetItem(product_name))
+            self.table.setItem(row_position, 2, QTableWidgetItem(f"NPR {price:.2f}"))
+            quantity = int(self.table.item(row_position, 1).text())
             cost = price * quantity
-            self.table.setItem(row, 3, QTableWidgetItem(f"NPR {cost:.2f}"))
+            self.table.setItem(row_position, 3, QTableWidgetItem(f"NPR {cost:.2f}"))
             self.project.add_item(product_name, quantity, price)
 
     def clear_item(self, row):
@@ -145,3 +185,10 @@ class ProductScraperApp(QMainWindow):
 
         total_cost = self.project.get_total_cost()
         QMessageBox.information(self, "Total Cost", f"Total Cost for {self.project.name}: NPR {total_cost:.2f}")
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = ProductScraperApp()
+    window.show()
+    sys.exit(app.exec())
