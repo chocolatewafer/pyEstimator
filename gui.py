@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal, QObject, QMutex, QWaitCondition
 from logic import Project
 from selenium_scraper import get_product_details
+from exporter import export_to_excel
 from queue import Queue
 
 
@@ -19,12 +20,16 @@ class ParseWorker(QThread):
         self.queue = queue
         self.mutex = mutex
         self.condition = condition
+        self.running = True
 
     def run(self):
-        while True:
+        while self.running:
             self.mutex.lock()
-            while self.queue.empty():
+            while self.queue.empty() and self.running:
                 self.condition.wait(self.mutex)
+            if not self.running:
+                self.mutex.unlock()
+                break
             link, quantity, row_position = self.queue.get()
             self.mutex.unlock()
 
@@ -35,6 +40,14 @@ class ParseWorker(QThread):
                 self.finished.emit("", 0, str(e), row_position)
 
             self.queue.task_done()
+
+    def stop(self):
+        """
+        Stops the thread gracefully.
+        """
+        self.running = False
+        self.condition.wakeAll()
+        self.wait()  # Wait for the thread to finish
 
 
 class ProductScraperApp(QMainWindow):
@@ -63,6 +76,7 @@ class ProductScraperApp(QMainWindow):
         self.project_name_label = QLabel("Enter Project Name:")
         self.layout.addWidget(self.project_name_label)
         self.project_name_input = QLineEdit()
+        self.project_name_input.setPlaceholderText("Enter project name (write once)")
         self.layout.addWidget(self.project_name_input)
 
         # New Project Button
@@ -99,19 +113,32 @@ class ProductScraperApp(QMainWindow):
         self.calculate_total_button.clicked.connect(self.calculate_total)
         self.layout.addWidget(self.calculate_total_button)
 
+        # Export Button
+        self.export_button = QPushButton("Export to Excel")
+        self.export_button.clicked.connect(self.export_table)
+        self.layout.addWidget(self.export_button)
+
         # Set Layout
         self.central_widget = QWidget()
         self.central_widget.setLayout(self.layout)
         self.setCentralWidget(self.central_widget)
+
+    def closeEvent(self, event):
+        """
+        Handles the window close event to stop the worker thread gracefully.
+        """
+        self.worker.stop()
+        event.accept()
 
     def new_project(self):
         """
         Resets the project and enables editing the project name.
         """
         self.project = None
-        self.project_name_input.setDisabled(False)
-        self.project_name_input.clear()
-        self.table.setRowCount(0)
+        self.project_name_input.setDisabled(False)  # Enable project name input
+        self.project_name_input.clear()  # Clear the project name field
+        self.table.setRowCount(0)  # Clear the table
+        QMessageBox.information(self, "New Project", "A new project has been created. You can now enter a new project name.")
 
     def add_item(self):
         # Get project name if not already set
@@ -121,7 +148,7 @@ class ProductScraperApp(QMainWindow):
                 QMessageBox.warning(self, "Error", "Please enter a project name.")
                 return
             self.project = Project(project_name)
-            self.project_name_input.setDisabled(True)  # Disable project name input
+            self.project_name_input.setDisabled(True)  # Disable project name input after setting
 
         # Get link and quantity
         link = self.link_input.text().strip()
@@ -186,9 +213,12 @@ class ProductScraperApp(QMainWindow):
         total_cost = self.project.get_total_cost()
         QMessageBox.information(self, "Total Cost", f"Total Cost for {self.project.name}: NPR {total_cost:.2f}")
 
+    def export_table(self):
+        """
+        Exports the table data to an Excel file.
+        """
+        if not self.project:
+            QMessageBox.warning(self, "Error", "Please create a project first.")
+            return
 
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = ProductScraperApp()
-    window.show()
-    sys.exit(app.exec())
+        export_to_excel(self.table, self.project.name)
