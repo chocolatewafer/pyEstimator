@@ -1,16 +1,34 @@
-import sys
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QVBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit, QWidget, QMessageBox
+    QMainWindow, QVBoxLayout, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QWidget, QMessageBox
 )
+from PySide6.QtCore import Qt, QThread, Signal
 from logic import Project
 from selenium_scraper import get_product_details
+
+
+class ParseWorker(QThread):
+    """
+    Worker thread for parsing product details.
+    """
+    finished = Signal(str, float, str)  # Emits product_name, price, error_message
+
+    def __init__(self, link):
+        super().__init__()
+        self.link = link
+
+    def run(self):
+        try:
+            product_name, price = get_product_details(self.link)
+            self.finished.emit(product_name, price, "")
+        except Exception as e:
+            self.finished.emit("", 0, str(e))
 
 
 class ProductScraperApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Project Cost Calculator")
-        self.setGeometry(100, 100, 500, 400)
+        self.setGeometry(100, 100, 800, 600)
 
         # Initialize project
         self.project = None
@@ -41,10 +59,12 @@ class ProductScraperApp(QMainWindow):
         self.add_item_button.clicked.connect(self.add_item)
         self.layout.addWidget(self.add_item_button)
 
-        # Display Items
-        self.items_display = QTextEdit()
-        self.items_display.setReadOnly(True)
-        self.layout.addWidget(self.items_display)
+        # Table to display items
+        self.table = QTableWidget()
+        self.table.setColumnCount(5)  # Columns: Product Name, Quantity, Price, Cost, Clear
+        self.table.setHorizontalHeaderLabels(["Product Name", "Quantity", "Price", "Cost", ""])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.layout.addWidget(self.table)
 
         # Calculate Total Button
         self.calculate_total_button = QPushButton("Calculate Total")
@@ -81,35 +101,47 @@ class ProductScraperApp(QMainWindow):
             QMessageBox.warning(self, "Error", "Quantity must be a positive integer.")
             return
 
-        # Parse product details
-        try:
-            product_name, price = get_product_details(link)
-            if not product_name or price is None:
-                raise ValueError("Could not parse product details.")
-        except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to parse product details: {e}")
-            return
+        # Add a loading row to the table
+        row_position = self.table.rowCount()
+        self.table.insertRow(row_position)
+        self.table.setItem(row_position, 0, QTableWidgetItem("Loading..."))
+        self.table.setItem(row_position, 1, QTableWidgetItem(str(quantity)))
+        self.table.setItem(row_position, 2, QTableWidgetItem(""))
+        self.table.setItem(row_position, 3, QTableWidgetItem(""))
+        clear_button = QPushButton("Clear")
+        clear_button.clicked.connect(lambda: self.clear_item(row_position))
+        self.table.setCellWidget(row_position, 4, clear_button)
 
-        # Add item to project
-        self.project.add_item(product_name, quantity, price)
+        # Start the parsing thread
+        self.worker = ParseWorker(link)
+        self.worker.finished.connect(lambda name, price, error: self.update_item(row_position, name, price, error, quantity))
+        self.worker.start()
 
-        # Update display
-        self.items_display.setText(self.project.get_summary())
+    def update_item(self, row, product_name, price, error, quantity):
+        """
+        Updates the table row with parsed data or an error message.
+        """
+        if error:
+            self.table.setItem(row, 0, QTableWidgetItem(f"Error: {error}"))
+        else:
+            self.table.setItem(row, 0, QTableWidgetItem(product_name))
+            self.table.setItem(row, 2, QTableWidgetItem(f"NPR {price:.2f}"))
+            cost = price * quantity
+            self.table.setItem(row, 3, QTableWidgetItem(f"NPR {cost:.2f}"))
+            self.project.add_item(product_name, quantity, price)
 
-        # Clear inputs
-        self.link_input.clear()
-        self.quantity_input.clear()
+    def clear_item(self, row):
+        """
+        Removes an item from the table and updates the project.
+        """
+        self.table.removeRow(row)
+        if row < len(self.project.items):
+            self.project.items.pop(row)
 
     def calculate_total(self):
         if not self.project or not self.project.items:
             QMessageBox.warning(self, "Error", "No items added.")
             return
 
-        QMessageBox.information(self, "Total Cost", f"Total Cost for {self.project.name}: NPR {self.project.total_cost:.2f}")
-
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = ProductScraperApp()
-    window.show()
-    sys.exit(app.exec())
+        total_cost = self.project.get_total_cost()
+        QMessageBox.information(self, "Total Cost", f"Total Cost for {self.project.name}: NPR {total_cost:.2f}")
