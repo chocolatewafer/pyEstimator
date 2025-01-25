@@ -108,32 +108,51 @@ class ProductScraperApp(QMainWindow):
         self.layout.addLayout(project_name_layout)
 
         # Product Link Input
+        project_link_layout = QHBoxLayout()
+
         self.link_label = QLabel("Enter Product Link:")
-        self.layout.addWidget(self.link_label)
+        project_link_layout.addWidget(self.link_label)
+
         self.link_input = QLineEdit()
-        self.layout.addWidget(self.link_input)
+        self.link_input.setPlaceholderText("Enter product link")
+        self.link_input.setClearButtonEnabled(True)  # Add clear button
+        project_link_layout.addWidget(self.link_input)
+
+        
 
         # Product Link Search Button
         self.link_search_button = QPushButton("Search Product via Link")
         self.link_search_button.clicked.connect(self.search_product_via_link)
-        self.layout.addWidget(self.link_search_button)
+        project_link_layout.addWidget(self.link_search_button)
+
+        self.layout.addLayout(project_link_layout)
 
         # Product Name Input
+
+        project_name_layout = QHBoxLayout()
         self.product_name_label = QLabel("Enter Product Name:")
-        self.layout.addWidget(self.product_name_label)
+        project_name_layout.addWidget(self.product_name_label)
+
         self.product_name_input = QLineEdit()
-        self.layout.addWidget(self.product_name_input)
+        self.product_name_input.setPlaceholderText("Enter product name")
+        self.product_name_input.setClearButtonEnabled(True)  # Add clear button
+        project_name_layout.addWidget(self.product_name_input)
 
         # Product Name Search Button
         self.product_search_button = QPushButton("Search Product via Name")
         self.product_search_button.clicked.connect(self.search_product_via_name)
-        self.layout.addWidget(self.product_search_button)
+        project_name_layout.addWidget(self.product_search_button)
+
+        self.layout.addLayout(project_name_layout)
 
         # Quantity Input
         self.quantity_label = QLabel("Enter Quantity (Default: 1):")
         self.layout.addWidget(self.quantity_label)
+
         self.quantity_input = QLineEdit()
+        self.quantity_input.setPlaceholderText("Enter quantity")
         self.quantity_input.setText("1")  # Default quantity
+        self.quantity_input.setClearButtonEnabled(True)  # Add clear button
         self.layout.addWidget(self.quantity_input)
 
         # Add Product Button
