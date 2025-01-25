@@ -107,6 +107,8 @@ class ProductScraperApp(QMainWindow):
 
         self.layout.addLayout(project_name_layout)
 
+        
+
         # Product Link Input
         project_link_layout = QHBoxLayout()
 
@@ -181,6 +183,11 @@ class ProductScraperApp(QMainWindow):
         self.export_button = QPushButton("Export to Excel")
         self.export_button.clicked.connect(self.export_table)
         self.layout.addWidget(self.export_button)
+
+        #new project button
+        self.new_project_button = QPushButton("New Project")
+        self.new_project_button.clicked.connect(self.new_project)
+        self.layout.addWidget(self.new_project_button)
 
         # Set Layout
         self.central_widget = QWidget()
@@ -425,6 +432,40 @@ class ProductScraperApp(QMainWindow):
             return
 
         export_to_excel(self.table, self.project.name)
+
+    def new_project(self):
+        """
+        Clears the table, stops the worker thread, and allows the user to create a new project.
+        """
+        if self.project:
+            # Stop the worker thread gracefully
+            self.worker.stop()  # Stop the worker thread
+            self.worker.wait()  # Wait for the thread to finish
+
+            # Clear the queue to discard any pending tasks
+            self.mutex.lock()  # Lock the mutex
+            while not self.queue.empty():
+                self.queue.get()
+                self.queue.task_done()
+            self.mutex.unlock()  # Unlock the mutex
+
+            # Clear the table
+            self.table.setRowCount(0)
+
+            # Reset the project
+            self.project = None
+
+            # Enable the project name input
+            self.project_name_input.setDisabled(False)
+
+            # Reinitialize the worker thread for the new project
+            self.worker = ParseWorker(self.queue, self.mutex, self.condition)
+            self.worker.finished.connect(self.update_item)
+            self.worker.start()
+
+            QMessageBox.information(self, "New Project", "Table cleared. You can now create a new project.")
+        else:
+            QMessageBox.warning(self, "Error", "No project to clear.")
 
     def closeEvent(self, event):
         """
