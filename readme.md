@@ -1,3 +1,2 @@
-# Price Estimator
-
-This is a project that helps parse parts prices (from a link) for a project and creates a table with the toal estimates.
+# pyEstimator
+This is a program to find estimates of Projects. Add product links or names along with quantity and it finds you a price and makes a table with total cost for that specific project.
