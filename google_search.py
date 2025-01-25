@@ -1,3 +1,4 @@
+import requests
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -9,81 +10,137 @@ from webdriver_manager.chrome import ChromeDriverManager
 import re
 import time
 
+# API keys for search engines (replace with your own keys)
+BING_API_KEY = "YOUR_BING_API_KEY"
+SERPAPI_KEY = "67e4610fe960a5b78895ca120b6e88edd350d2a3"
 
-def search_product(product_name):
+def search_with_bing_api(query):
     """
-    Searches for a product on Google, Bing, and DuckDuckGo and returns the price and URL from the first result where the price is found.
+    Searches for a product using the Bing Search API.
     """
-    # Set up Selenium options
+    try:
+        url = f"https://api.bing.microsoft.com/v7.0/search?q={query}"
+        headers = {"Ocp-Apim-Subscription-Key": BING_API_KEY}
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+
+        if "webPages" in data and "value" in data["webPages"]:
+            for result in data["webPages"]["value"]:
+                link = result.get("url", "")
+                snippet = result.get("snippet", "")
+                if "NPR" in snippet or "Rs." in snippet:
+                    price = extract_price_from_text(snippet)
+                    if price:
+                        return price, link
+        return None, None
+    except Exception as e:
+        print(f"Error searching with Bing API: {e}")
+        return None, None
+
+def search_with_serpapi(query):
+    """
+    Searches for a product using SerpAPI (for Google).
+    """
+    try:
+        url = f"https://google.serper.dev/search.json?q={query}&api_key={SERPAPI_KEY}"
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+
+        if "organic_results" in data:
+            for result in data["organic_results"]:
+                link = result.get("link", "")
+                snippet = result.get("snippet", "")
+                if "NPR" in snippet or "Rs." in snippet:
+                    price = extract_price_from_text(snippet)
+                    if price:
+                        return price, link
+        return None, None
+    except Exception as e:
+        print(f"Error searching with SerpAPI: {e}")
+        return None, None
+
+def extract_price_from_text(text):
+    """
+    Extracts the price from a text snippet.
+    """
+    price_match = re.search(r"Rs\.?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)", text)
+    if price_match:
+        return float(price_match.group(1).replace(",", ""))
+    return None
+
+def search_with_selenium(product_name, search_engine, url, search_box_name, result_selector):
+    """
+    Searches for a product using Selenium on a given search engine.
+    """
     chrome_options = Options()
-    chrome_options.add_argument("--headless")  # Run in headless mode
-    chrome_options.add_argument("--disable-gpu")  # Disable GPU (not recommended for hardware acceleration)
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--enable-unsafe-swiftshader")  # Enable SwiftShader with lower security guarantees
-    chrome_options.add_argument("--ignore-certificate-errors")  # Ignore SSL certificate errors
-    chrome_options.add_argument("--disable-dev-shm-usage")  # Disable shared memory usage (suppresses USB errors)
-    chrome_options.add_argument("--log-level=3")  # Suppress logs
+    chrome_options.add_argument("--ignore-certificate-errors")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--log-level=3")
 
-    # Set up WebDriver using webdriver_manager
     service = Service(executable_path=ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=chrome_options)
 
     try:
-        # List of search engines to try
-        search_engines = [
-            ("Bing", "https://www.bing.com", "q", ".b_algo"),  # Bing result container
-            ("Google", "https://www.google.com", "q", ".tF2Cxc"),  # Google result container
-            ("DuckDuckGo", "https://duckduckgo.com", "q", ".result")  # DuckDuckGo result container
-        ]
+        driver.get(url)
+        search_box = driver.find_element(By.NAME, search_box_name)
+        search_box.send_keys(f"{product_name} price in Nepal Daraz")
+        search_box.send_keys(Keys.RETURN)
 
-        for engine_name, url, search_box_name, result_selector in search_engines:
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, result_selector))
+        )
+
+        results = driver.find_elements(By.CSS_SELECTOR, result_selector)[:5]
+        for result in results:
             try:
-                # Open the search engine
-                driver.get(url)
-
-                # Search for the product with "price in Nepal Daraz"
-                search_box = driver.find_element(By.NAME, search_box_name)
-                search_box.send_keys(f"{product_name} price in Nepal Daraz")
-                search_box.send_keys(Keys.RETURN)
-
-                # Wait for the search results to load
-                WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, result_selector))
-                )
-
-                # Get the top 5 results
-                results = driver.find_elements(By.CSS_SELECTOR, result_selector)[:5]
-
-                # Iterate through the top 5 results
-                for result in results:
-                    try:
-                        # Extract the link
-                        link = result.find_element(By.CSS_SELECTOR, "a").get_attribute("href")
-
-                        # Print the result for debugging
-                        print(f"Search Engine: {engine_name}")
-                        print(f"Link: {link}")
-
-                        # Send the link to selenium_scraper.py to extract the price
-                        from selenium_scraper import get_product_details
-                        try:
-                            product_name, price = get_product_details(link)
-                            if price:
-                                return price, link  # Return the first price found
-                        except Exception as e:
-                            print(f"Error extracting price from {link}: {e}")
-                            continue
-
-                    except Exception as e:
-                        print(f"Error extracting metadata from result: {e}")
-                        continue
-
+                link = result.find_element(By.CSS_SELECTOR, "a").get_attribute("href")
+                snippet = result.text
+                if "NPR" in snippet or "Rs." in snippet:
+                    price = extract_price_from_text(snippet)
+                    if price:
+                        return price, link
             except Exception as e:
-                print(f"Error searching on {engine_name}: {e}")
+                print(f"Error extracting metadata from result: {e}")
                 continue
-
-        # If no price is found in the top 5 results of any search engine
         return None, None
-
+    except Exception as e:
+        print(f"Error searching on {search_engine}: {e}")
+        return None, None
     finally:
         driver.quit()
+
+def search_product(product_name):
+    """
+    Searches for a product using multiple search engines and APIs.
+    """
+    # Try Bing API first
+    price, link = search_with_bing_api(f"{product_name} price in Nepal Daraz")
+    if price:
+        return price, link
+
+    # Try SerpAPI (Google) next
+    price, link = search_with_serpapi(f"{product_name} price in Nepal Daraz")
+    if price:
+        return price, link
+
+    # Fallback to Selenium-based search engines
+    search_engines = [
+        ("Bing", "https://www.bing.com", "q", ".b_algo"),
+        ("Google", "https://www.google.com", "q", ".tF2Cxc"),
+        ("DuckDuckGo", "https://duckduckgo.com", "q", ".result"),
+        ("Yahoo", "https://search.yahoo.com", "p", ".algo"),
+        ("Ecosia", "https://www.ecosia.org", "q", ".result"),
+    ]
+
+    for engine_name, url, search_box_name, result_selector in search_engines:
+        price, link = search_with_selenium(product_name, engine_name, url, search_box_name, result_selector)
+        if price:
+            return price, link
+
+    # If no price is found
+    return None, None
